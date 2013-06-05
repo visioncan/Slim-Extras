@@ -45,9 +45,64 @@ namespace Slim\Extras\Views;
 class Mustache extends \Slim\View
 {
     /**
-     * @var string The path to the directory containing Mustache.php
+     * @var string The path to the directory containing Mustache.php.
+     *             Not required if an autoloader covering Mustache.php is
+     *             already in place.
      */
-    public static $mustacheDirectory = null;
+    public static $mustacheDirectory = '';
+
+    /**
+     * @var array An array of Mustache_Engine options
+     */
+    public static $mustacheOptions = array();
+
+    /**
+     * @var Mustache_Engine A Mustache engine instance for this view
+     */
+    private $engine = null;
+
+    /**
+     * @param array $options Mustache_Engine configuration options
+     */
+    public function __construct(array $options = null)
+    {
+        if ($options !== null) {
+            self::$mustacheOptions = $options;
+        }
+    }
+
+    /**
+     * Append data to existing View data. Accepts arrays as well as an object
+     *
+     * Note that you can append arrays to an existing object, or an object to an
+     * existing array, but NOT an object to an object. Use one object only, at
+     * the most.
+     *
+     * @throws  InvalidArgumentException
+     * @param   array|Object $data
+     * @return  void
+     */
+    public function appendData( $data )
+    {
+        if ( is_object( $this->data ) and is_object($data) )
+        {
+            // Can't merge two objects safely, internal state might be lost
+            throw new InvalidArgumentException("Can't merge view data of multiple objects");
+        }
+        elseif ( is_object( $this->data ) )
+        {
+            foreach ( $data as $property => $item ) $this->data->$property = $item;
+        }
+        elseif ( is_object( $data ) )
+        {
+            foreach ( $this->data as $property => $item ) $data->$property = $item;
+            $this->data = $data;
+        }
+        else
+        {
+            $this->data = array_merge( $this->data, $data );
+        }
+    }
 
     /**
      * Renders a template using Mustache.php.
@@ -58,10 +113,38 @@ class Mustache extends \Slim\View
      */
     public function render($template)
     {
-        require_once self::$mustacheDirectory . '/Autoloader.php';
-        \Mustache_Autoloader::register(dirname(self::$mustacheDirectory));
-        $m = new \Mustache_Engine();
-        $contents = file_get_contents($this->getTemplatesDirectory() . '/' . ltrim($template, '/'));
-        return $m->render($contents, $this->data);
+        return $this->getEngine()->render($template, $this->data);
+    }
+
+    /**
+     * Get a Mustache_Engine instance.
+     *
+     * @return Mustache_Engine
+     */
+    private function getEngine()
+    {
+        if (!isset($this->engine)) {
+            // Check for Composer autoloading
+            if (!class_exists('Mustache_Engine')) {
+                require_once self::$mustacheDirectory . '/Autoloader.php';
+                \Mustache_Autoloader::register(dirname(self::$mustacheDirectory));
+            }
+
+            $options = self::$mustacheOptions;
+
+            // Autoload templates from the templates directory.
+            if (!isset($options['loader'])) {
+                $options['loader'] = new Mustache_Loader_FilesystemLoader($this->getTemplatesDirectory());
+            }
+
+            // If a partials loader is not specified, fall back to the default template loader.
+            if (!isset($options['partials_loader']) && !isset($options['partials'])) {
+                $options['partials_loader'] = $options['loader'];
+            }
+
+            $this->engine = new \Mustache_Engine($options);
+        }
+
+        return $this->engine;
     }
 }
